@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lumu-mcp-server"
+version = "1.0.0"
+description = "MCP server for Lumu Defender API integration with Claude Desktop"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Juan Pablo Gonzalez", email = "your-email@example.com"}
+]
+keywords = ["mcp", "lumu", "security", "claude", "ai", "cybersecurity"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jpyoda/lumu-mcp"
+Repository = "https://github.com/jpyoda/lumu-mcp"
+Documentation = "https://github.com/jpyoda/lumu-mcp#readme"
+"Bug Tracker" = "https://github.com/jpyoda/lumu-mcp/issues"
+
+[project.scripts]
+lumu-mcp-server = "lumu_mcp_server.server:main"
