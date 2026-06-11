@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lumu-mcp-server"
-version = "1.0.0"
+version = "1.1.0"
 description = "MCP server for Lumu Defender API integration with Claude Desktop"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Juan Pablo Gonzalez", email = "your-email@example.com"}
+    {name = "Juan Pablo Gonzalez", email = "support@lumu.io"}
 ]
 keywords = ["mcp", "lumu", "security", "claude", "ai", "cybersecurity"]
 classifiers = [

@@ -52,13 +52,13 @@ async def handle_list_tools() -> list[types.Tool]:
         tools.extend([
             types.Tool(
                 name="get_incidents",
-                description="Retrieve security incidents from Lumu Defender API",
+                description="Retrieve security incidents from Lumu Defender API with pagination support",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "from_date": {
                             "type": "string",
-                            "description": "Start date in ISO format (e.g., 2024-01-01T00:00:00Z). Default: 7 days ago"
+                            "description": "Start date in ISO format (e.g., 2024-01-01T00:00:00Z). Default: 7 days ago. Max range: 90 days unless fetch_all is true."
                         },
                         "to_date": {
                             "type": "string",
@@ -86,6 +86,21 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "type": "integer"
                             },
                             "description": "Filter by label IDs. If not specified, all labels are returned"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number for pagination (0-indexed). Default: 0",
+                            "minimum": 0
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of items per page. Default: 50, max: 100",
+                            "minimum": 1,
+                            "maximum": 100
+                        },
+                        "fetch_all": {
+                            "type": "boolean",
+                            "description": "If true, automatically fetches ALL incidents with pagination. Handles large date ranges by chunking. Use this to get complete incident lists."
                         }
                     },
                     "required": [],
@@ -147,7 +162,7 @@ async def handle_list_tools() -> list[types.Tool]:
             ),
             types.Tool(
                 name="get_open_incidents",
-                description="Retrieve open security incidents from Lumu Defender",
+                description="Retrieve open security incidents from Lumu Defender with pagination support",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -165,6 +180,17 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "type": "integer"
                             },
                             "description": "Filter by label IDs. If not specified, all labels are returned"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number for pagination (0-indexed). Default: 0",
+                            "minimum": 0
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of items per page (default: 50, max: 100)",
+                            "minimum": 1,
+                            "maximum": 100
                         }
                     },
                     "required": [],
@@ -173,7 +199,7 @@ async def handle_list_tools() -> list[types.Tool]:
             ),
             types.Tool(
                 name="get_muted_incidents",
-                description="Retrieve muted security incidents from Lumu Defender",
+                description="Retrieve muted security incidents from Lumu Defender with pagination support",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -191,6 +217,17 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "type": "integer"
                             },
                             "description": "Filter by label IDs. If not specified, all labels are returned"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number for pagination (0-indexed). Default: 0",
+                            "minimum": 0
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of items per page (default: 50, max: 100)",
+                            "minimum": 1,
+                            "maximum": 100
                         }
                     },
                     "required": [],
@@ -199,7 +236,7 @@ async def handle_list_tools() -> list[types.Tool]:
             ),
             types.Tool(
                 name="get_closed_incidents",
-                description="Retrieve closed security incidents from Lumu Defender",
+                description="Retrieve closed security incidents from Lumu Defender with pagination support",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -217,6 +254,17 @@ async def handle_list_tools() -> list[types.Tool]:
                                 "type": "integer"
                             },
                             "description": "Filter by label IDs. If not specified, all labels are returned"
+                        },
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number for pagination (0-indexed). Default: 0",
+                            "minimum": 0
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of items per page (default: 50, max: 100)",
+                            "minimum": 1,
+                            "maximum": 100
                         }
                     },
                     "required": [],
@@ -384,15 +432,15 @@ async def handle_call_tool(
                     text="❌ Error: Lumu Defender API key not configured. Please set LUMU_DEFENDER_API_KEY in the Claude Desktop configuration."
                 )
             ]
-        
+
         try:
             # Initialize client if needed
             if lumu_client is None:
                 lumu_client = LumuDefenderClient()
-            
+
             # Parse arguments
             args = arguments or {}
-            
+
             # Parse dates if provided
             from_date = None
             to_date = None
@@ -400,20 +448,61 @@ async def handle_call_tool(
                 from_date = datetime.fromisoformat(args["from_date"].replace("Z", "+00:00"))
             if "to_date" in args:
                 to_date = datetime.fromisoformat(args["to_date"].replace("Z", "+00:00"))
-            
-            # Get incidents
-            result = await lumu_client.get_incidents(
-                from_date=from_date,
-                to_date=to_date,
-                status=args.get("status"),
-                adversary_types=args.get("adversary_types"),
-                labels=args.get("labels")
-            )
-            
+
+            # Get pagination parameters
+            page = args.get("page", 0)
+            limit = args.get("limit", 50)
+            fetch_all = args.get("fetch_all", False)
+
+            # Determine which method to use based on fetch_all and date range
+            if fetch_all:
+                # Check if date range is large (requires chunking)
+                if from_date and to_date:
+                    range_days = (to_date - from_date).days
+                    if range_days > lumu_client.MAX_DATE_RANGE_DAYS:
+                        # Use chunked method for large date ranges
+                        result = await lumu_client.get_all_incidents_chunked(
+                            from_date=from_date,
+                            to_date=to_date,
+                            status=args.get("status"),
+                            adversary_types=args.get("adversary_types"),
+                            labels=args.get("labels")
+                        )
+                    else:
+                        # Use standard pagination for smaller ranges
+                        result = await lumu_client.get_all_incidents(
+                            from_date=from_date,
+                            to_date=to_date,
+                            status=args.get("status"),
+                            adversary_types=args.get("adversary_types"),
+                            labels=args.get("labels")
+                        )
+                else:
+                    # Default date range, use standard pagination
+                    result = await lumu_client.get_all_incidents(
+                        from_date=from_date,
+                        to_date=to_date,
+                        status=args.get("status"),
+                        adversary_types=args.get("adversary_types"),
+                        labels=args.get("labels")
+                    )
+            else:
+                # Standard paginated request
+                result = await lumu_client.get_incidents(
+                    from_date=from_date,
+                    to_date=to_date,
+                    status=args.get("status"),
+                    adversary_types=args.get("adversary_types"),
+                    labels=args.get("labels"),
+                    page=page,
+                    limit=limit
+                )
+
             # Format response
             incidents = result.get("incidents", [])
             total = len(incidents)
-            
+            pagination = result.get("pagination", {})
+
             if total == 0:
                 # Show helpful information about the search
                 from_str = from_date.strftime("%Y-%m-%d") if from_date else "default (7 days ago)"
@@ -424,31 +513,45 @@ async def handle_call_tool(
                     message += f"• Status filter: {args['status']}\n"
                 if args.get("adversary_types"):
                     message += f"• Adversary types: {args['adversary_types']}\n"
-                message += f"\nTip: Try a broader date range (e.g., last 30 days) or remove filters to see more results."
+                message += f"\nTip: Try a broader date range or use fetch_all=true to get all incidents."
             else:
                 # Create summary
                 status_counts = {}
                 type_counts = {}
-                
+
                 for incident in incidents:
                     # Count by status
                     status = incident.get("status", "unknown")
                     status_counts[status] = status_counts.get(status, 0) + 1
-                    
+
                     # Count by adversary type
                     adv_type = incident.get("adversaryType", "unknown")
                     type_counts[adv_type] = type_counts.get(adv_type, 0) + 1
-                
+
                 message = f"Found {total} incident(s)\n\n"
-                
-                message += "Status breakdown:\n"
+
+                # Add pagination info
+                if fetch_all:
+                    if result.get("chunks_processed"):
+                        message += f"📊 Fetched across {result['chunks_processed']} date chunks\n"
+                    if result.get("pages_fetched"):
+                        message += f"📊 Fetched across {result['pages_fetched']} pages\n"
+                else:
+                    has_more = pagination.get("has_more", False)
+                    if has_more:
+                        message += f"📄 Page {page + 1} (showing {total} of more available)\n"
+                        message += f"💡 Use page={page + 1} for next page, or fetch_all=true for all incidents\n"
+                    else:
+                        message += f"📄 Page {page + 1} (complete results)\n"
+
+                message += "\nStatus breakdown:\n"
                 for status, count in status_counts.items():
                     message += f"  • {status}: {count}\n"
-                
+
                 message += "\nAdversary type breakdown:\n"
                 for adv_type, count in type_counts.items():
                     message += f"  • {adv_type}: {count}\n"
-                
+
                 # Show first few incidents as examples
                 message += "\nRecent incidents:\n"
                 for incident in incidents[:5]:
@@ -456,23 +559,30 @@ async def handle_call_tool(
                     message += f"  Status: {incident.get('status', 'N/A')}\n"
                     message += f"  Type: {incident.get('adversaryType', 'N/A')}\n"
                     message += f"  First seen: {incident.get('firstSeen', 'N/A')}\n"
-                    message += f"  Description: {incident.get('description', 'N/A')[:100]}...\n"
-                
+                    desc = incident.get('description', 'N/A')
+                    if desc and len(desc) > 100:
+                        desc = desc[:100] + "..."
+                    message += f"  Description: {desc}\n"
+
                 if total > 5:
                     message += f"\n... and {total - 5} more incidents"
-            
+
             return [
                 types.TextContent(
                     type="text",
                     text=message
                 )
             ]
-            
+
         except ValueError as e:
+            error_msg = str(e)
+            # Provide helpful hints for common errors
+            if "exceeds maximum" in error_msg:
+                error_msg += "\n\n💡 Tip: Use fetch_all=true to automatically handle large date ranges."
             return [
                 types.TextContent(
                     type="text",
-                    text=f"❌ Configuration error: {str(e)}"
+                    text=f"❌ Configuration error: {error_msg}"
                 )
             ]
         except Exception as e:

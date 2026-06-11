@@ -32,32 +32,70 @@ class LumuDefenderClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.client.close()
     
+    # Maximum date range allowed by Lumu API (in days)
+    MAX_DATE_RANGE_DAYS = 90
+
+    def _validate_date_range(self, from_date: datetime, to_date: datetime) -> None:
+        """Validate date range constraints.
+
+        Args:
+            from_date: Start date for the query.
+            to_date: End date for the query.
+
+        Raises:
+            ValueError: If date range is invalid.
+        """
+        if to_date < from_date:
+            raise ValueError("to_date must be after from_date")
+
+        # Allow a small buffer for timezone differences (1 day)
+        max_future = datetime.now(timezone.utc) + timedelta(days=1)
+        if to_date > max_future:
+            raise ValueError("to_date cannot be in the future")
+
+        range_days = (to_date - from_date).days
+        if range_days > self.MAX_DATE_RANGE_DAYS:
+            raise ValueError(
+                f"Date range of {range_days} days exceeds maximum of {self.MAX_DATE_RANGE_DAYS} days. "
+                f"Use fetch_all=True with automatic chunking for larger date ranges."
+            )
+
     async def get_incidents(
         self,
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         status: Optional[List[str]] = None,
         adversary_types: Optional[List[str]] = None,
-        labels: Optional[List[int]] = None
+        labels: Optional[List[int]] = None,
+        page: int = 0,
+        limit: int = 50
     ) -> Dict[str, Any]:
         """Retrieve incidents from Lumu Defender.
-        
+
         Args:
             from_date: Search start date. Default is 7 days before current date.
             to_date: Search end date. Default is current date.
             status: Incident status filter. Options: "open", "muted", "closed"
             adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
             labels: Label IDs filter.
-        
+            page: Page number for pagination (0-indexed). Default is 0.
+            limit: Number of items per page. Default is 50, max is 100.
+
         Returns:
-            Dictionary containing the incidents data.
+            Dictionary containing the incidents data with pagination info.
         """
         # Set default dates if not provided
         if to_date is None:
             to_date = datetime.now(timezone.utc)
         if from_date is None:
             from_date = to_date - timedelta(days=7)
-        
+
+        # Validate date range
+        self._validate_date_range(from_date, to_date)
+
+        # Ensure limit is within bounds
+        limit = max(1, min(limit, 100))
+
         # Build request payload with proper millisecond formatting
         payload = {
             "fromDate": from_date.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
@@ -86,9 +124,15 @@ class LumuDefenderClient:
         
         # Make API request
         url = f"{self.BASE_URL}/incidents/all"
-        params = {"key": self.api_key}
-        
-        logger.info(f"Fetching incidents from {from_date} to {to_date}")
+        # Pagination parameters go in query string, not body
+        # API uses 1-indexed pages and 'items' instead of 'limit'
+        params = {
+            "key": self.api_key,
+            "page": page + 1,  # Convert 0-indexed to 1-indexed
+            "items": limit
+        }
+
+        logger.info(f"Fetching incidents from {from_date} to {to_date} (page={page + 1}, items={limit})")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
@@ -99,7 +143,18 @@ class LumuDefenderClient:
                 # API returns incidents in 'items' array, normalize to 'incidents' for consistency
                 if 'items' in data and 'incidents' not in data:
                     data['incidents'] = data['items']
-                logger.info(f"Retrieved {len(data.get('incidents', []))} incidents")
+
+                incidents_count = len(data.get('incidents', []))
+                logger.info(f"Retrieved {incidents_count} incidents (page={page}, limit={limit})")
+
+                # Add pagination metadata
+                data['pagination'] = {
+                    'page': page,
+                    'limit': limit,
+                    'returned': incidents_count,
+                    'has_more': incidents_count >= limit
+                }
+
                 return data
                 
             except httpx.HTTPStatusError as e:
@@ -111,7 +166,155 @@ class LumuDefenderClient:
                     raise Exception(f"API request failed: {e.response.status_code} - {e.response.text}")
             except httpx.RequestError as e:
                 raise Exception(f"Network error while connecting to Lumu API: {str(e)}")
-    
+
+    async def get_all_incidents(
+        self,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        status: Optional[List[str]] = None,
+        adversary_types: Optional[List[str]] = None,
+        labels: Optional[List[int]] = None,
+        max_pages: int = 100
+    ) -> Dict[str, Any]:
+        """Retrieve ALL incidents with automatic pagination.
+
+        This method automatically paginates through all results to retrieve
+        the complete list of incidents matching the criteria.
+
+        Args:
+            from_date: Search start date. Default is 7 days before current date.
+            to_date: Search end date. Default is current date.
+            status: Incident status filter. Options: "open", "muted", "closed"
+            adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
+            labels: Label IDs filter.
+            max_pages: Maximum number of pages to fetch (safety limit). Default is 100.
+
+        Returns:
+            Dictionary containing all incidents and pagination summary.
+        """
+        all_incidents = []
+        page = 0
+        limit = 100  # Max per request for efficiency
+
+        logger.info(f"Fetching all incidents with auto-pagination...")
+
+        while page < max_pages:
+            result = await self.get_incidents(
+                from_date=from_date,
+                to_date=to_date,
+                status=status,
+                adversary_types=adversary_types,
+                labels=labels,
+                page=page,
+                limit=limit
+            )
+
+            incidents = result.get("incidents", [])
+            all_incidents.extend(incidents)
+
+            pagination = result.get("pagination", {})
+            has_more = pagination.get("has_more", False)
+
+            logger.info(f"Page {page}: retrieved {len(incidents)} incidents (total so far: {len(all_incidents)})")
+
+            if not has_more or len(incidents) < limit:
+                break
+
+            page += 1
+
+        logger.info(f"Completed fetching all incidents: {len(all_incidents)} total across {page + 1} pages")
+
+        return {
+            "incidents": all_incidents,
+            "total": len(all_incidents),
+            "pages_fetched": page + 1,
+            "pagination": {
+                "complete": page < max_pages,
+                "total_items": len(all_incidents)
+            }
+        }
+
+    async def get_all_incidents_chunked(
+        self,
+        from_date: datetime,
+        to_date: datetime,
+        status: Optional[List[str]] = None,
+        adversary_types: Optional[List[str]] = None,
+        labels: Optional[List[int]] = None,
+        chunk_days: int = 30
+    ) -> Dict[str, Any]:
+        """Retrieve incidents across large date ranges by chunking into smaller queries.
+
+        This method handles date ranges larger than the API's maximum (90 days) by
+        breaking them into smaller chunks and aggregating the results.
+
+        Args:
+            from_date: Search start date (required).
+            to_date: Search end date (required).
+            status: Incident status filter. Options: "open", "muted", "closed"
+            adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
+            labels: Label IDs filter.
+            chunk_days: Size of each date chunk in days. Default is 30.
+
+        Returns:
+            Dictionary containing all incidents (deduplicated) and summary.
+        """
+        all_incidents = []
+        current_start = from_date
+        chunks_processed = 0
+
+        total_days = (to_date - from_date).days
+        logger.info(f"Fetching incidents for {total_days} days in {chunk_days}-day chunks...")
+
+        while current_start < to_date:
+            current_end = min(current_start + timedelta(days=chunk_days), to_date)
+
+            logger.info(f"Processing chunk {chunks_processed + 1}: {current_start.date()} to {current_end.date()}")
+
+            result = await self.get_all_incidents(
+                from_date=current_start,
+                to_date=current_end,
+                status=status,
+                adversary_types=adversary_types,
+                labels=labels
+            )
+
+            chunk_incidents = result.get("incidents", [])
+            all_incidents.extend(chunk_incidents)
+            chunks_processed += 1
+
+            logger.info(f"Chunk {chunks_processed}: retrieved {len(chunk_incidents)} incidents")
+
+            current_start = current_end
+
+        # Deduplicate incidents by ID (in case of overlap at chunk boundaries)
+        seen_ids = set()
+        unique_incidents = []
+        duplicates_removed = 0
+
+        for incident in all_incidents:
+            incident_id = incident.get("id")
+            if incident_id and incident_id not in seen_ids:
+                seen_ids.add(incident_id)
+                unique_incidents.append(incident)
+            else:
+                duplicates_removed += 1
+
+        logger.info(f"Completed chunked fetch: {len(unique_incidents)} unique incidents "
+                   f"({duplicates_removed} duplicates removed) across {chunks_processed} chunks")
+
+        return {
+            "incidents": unique_incidents,
+            "total": len(unique_incidents),
+            "chunks_processed": chunks_processed,
+            "duplicates_removed": duplicates_removed,
+            "date_range": {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "days": total_days
+            }
+        }
+
     async def get_incident_details(self, incident_id: str) -> Dict[str, Any]:
         """Retrieve details of a specific incident.
         
@@ -151,19 +354,32 @@ class LumuDefenderClient:
     async def get_open_incidents(
         self,
         adversary_types: Optional[List[str]] = None,
-        labels: Optional[List[int]] = None
+        labels: Optional[List[int]] = None,
+        page: int = 0,
+        limit: int = 50
     ) -> Dict[str, Any]:
         """Retrieve open incidents from Lumu Defender.
-        
+
         Args:
             adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
             labels: Label IDs filter.
-        
+            page: Page number for pagination (0-indexed). Default is 0.
+            limit: Number of items per page. Default is 50, max is 100.
+
         Returns:
-            Dictionary containing the open incidents data.
+            Dictionary containing the open incidents data with pagination info.
         """
+        # Ensure limit is within bounds
+        limit = max(1, min(limit, 100))
+
         url = f"{self.BASE_URL}/incidents/open"
-        params = {"key": self.api_key}
+        # Pagination parameters go in query string
+        # API uses 1-indexed pages and 'items' parameter
+        params = {
+            "key": self.api_key,
+            "page": page + 1,  # Convert 0-indexed to 1-indexed
+            "items": limit
+        }
         
         # Build request payload
         payload = {}
@@ -179,21 +395,32 @@ class LumuDefenderClient:
         
         if labels:
             payload["labels"] = labels
-        
-        logger.info(f"Fetching open incidents")
-        
+
+        logger.info(f"Fetching open incidents (page={page + 1}, items={limit})")
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(url, params=params, json=payload)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 # API returns incidents in 'items' array, normalize to 'incidents' for consistency
                 if 'items' in data and 'incidents' not in data:
                     data['incidents'] = data['items']
-                logger.info(f"Retrieved {len(data.get('incidents', []))} open incidents")
+
+                incidents_count = len(data.get('incidents', []))
+                logger.info(f"Retrieved {incidents_count} open incidents (page={page + 1})")
+
+                # Add pagination metadata
+                data['pagination'] = {
+                    'page': page,
+                    'limit': limit,
+                    'returned': incidents_count,
+                    'has_more': incidents_count >= limit
+                }
+
                 return data
-                
+
             except httpx.HTTPStatusError as e:
                 logger.error(f"API Error - Status: {e.response.status_code}, Response: {e.response.text}")
                 if e.response.status_code == 401:
@@ -204,27 +431,40 @@ class LumuDefenderClient:
                     raise Exception(f"API request failed with status {e.response.status_code}. Response: {e.response.text}")
             except httpx.RequestError as e:
                 raise Exception(f"Network error while connecting to Lumu API: {str(e)}")
-    
+
     async def get_muted_incidents(
         self,
         adversary_types: Optional[List[str]] = None,
-        labels: Optional[List[int]] = None
+        labels: Optional[List[int]] = None,
+        page: int = 0,
+        limit: int = 50
     ) -> Dict[str, Any]:
         """Retrieve muted incidents from Lumu Defender.
-        
+
         Args:
             adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
             labels: Label IDs filter.
-        
+            page: Page number for pagination (0-indexed). Default is 0.
+            limit: Number of items per page. Default is 50, max is 100.
+
         Returns:
-            Dictionary containing the muted incidents data.
+            Dictionary containing the muted incidents data with pagination info.
         """
+        # Ensure limit is within bounds
+        limit = max(1, min(limit, 100))
+
         url = f"{self.BASE_URL}/incidents/muted"
-        params = {"key": self.api_key}
-        
+        # Pagination parameters go in query string
+        # API uses 1-indexed pages and 'items' parameter
+        params = {
+            "key": self.api_key,
+            "page": page + 1,  # Convert 0-indexed to 1-indexed
+            "items": limit
+        }
+
         # Build request payload
         payload = {}
-        
+
         # Add optional filters
         if adversary_types:
             # Validate adversary types
@@ -233,24 +473,35 @@ class LumuDefenderClient:
             if invalid:
                 raise ValueError(f"Invalid adversary types: {invalid}. Must be one of {valid_types}")
             payload["adversary-types"] = adversary_types
-        
+
         if labels:
             payload["labels"] = labels
-        
-        logger.info(f"Fetching muted incidents")
-        
+
+        logger.info(f"Fetching muted incidents (page={page + 1}, items={limit})")
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(url, params=params, json=payload)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 # API returns incidents in 'items' array, normalize to 'incidents' for consistency
                 if 'items' in data and 'incidents' not in data:
                     data['incidents'] = data['items']
-                logger.info(f"Retrieved {len(data.get('incidents', []))} muted incidents")
+
+                incidents_count = len(data.get('incidents', []))
+                logger.info(f"Retrieved {incidents_count} muted incidents (page={page + 1})")
+
+                # Add pagination metadata
+                data['pagination'] = {
+                    'page': page,
+                    'limit': limit,
+                    'returned': incidents_count,
+                    'has_more': incidents_count >= limit
+                }
+
                 return data
-                
+
             except httpx.HTTPStatusError as e:
                 logger.error(f"API Error - Status: {e.response.status_code}, Response: {e.response.text}")
                 if e.response.status_code == 401:
@@ -265,23 +516,36 @@ class LumuDefenderClient:
     async def get_closed_incidents(
         self,
         adversary_types: Optional[List[str]] = None,
-        labels: Optional[List[int]] = None
+        labels: Optional[List[int]] = None,
+        page: int = 0,
+        limit: int = 50
     ) -> Dict[str, Any]:
         """Retrieve closed incidents from Lumu Defender.
-        
+
         Args:
             adversary_types: Adversary types filter. Options: "C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"
             labels: Label IDs filter.
-        
+            page: Page number for pagination (0-indexed). Default is 0.
+            limit: Number of items per page. Default is 50, max is 100.
+
         Returns:
-            Dictionary containing the closed incidents data.
+            Dictionary containing the closed incidents data with pagination info.
         """
+        # Ensure limit is within bounds
+        limit = max(1, min(limit, 100))
+
         url = f"{self.BASE_URL}/incidents/closed"
-        params = {"key": self.api_key}
-        
+        # Pagination parameters go in query string
+        # API uses 1-indexed pages and 'items' parameter
+        params = {
+            "key": self.api_key,
+            "page": page + 1,  # Convert 0-indexed to 1-indexed
+            "items": limit
+        }
+
         # Build request payload
         payload = {}
-        
+
         # Add optional filters
         if adversary_types:
             # Validate adversary types
@@ -290,24 +554,35 @@ class LumuDefenderClient:
             if invalid:
                 raise ValueError(f"Invalid adversary types: {invalid}. Must be one of {valid_types}")
             payload["adversary-types"] = adversary_types
-        
+
         if labels:
             payload["labels"] = labels
-        
-        logger.info(f"Fetching closed incidents")
-        
+
+        logger.info(f"Fetching closed incidents (page={page + 1}, items={limit})")
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(url, params=params, json=payload)
                 response.raise_for_status()
-                
+
                 data = response.json()
                 # API returns incidents in 'items' array, normalize to 'incidents' for consistency
                 if 'items' in data and 'incidents' not in data:
                     data['incidents'] = data['items']
-                logger.info(f"Retrieved {len(data.get('incidents', []))} closed incidents")
+
+                incidents_count = len(data.get('incidents', []))
+                logger.info(f"Retrieved {incidents_count} closed incidents (page={page + 1})")
+
+                # Add pagination metadata
+                data['pagination'] = {
+                    'page': page,
+                    'limit': limit,
+                    'returned': incidents_count,
+                    'has_more': incidents_count >= limit
+                }
+
                 return data
-                
+
             except httpx.HTTPStatusError as e:
                 logger.error(f"API Error - Status: {e.response.status_code}, Response: {e.response.text}")
                 if e.response.status_code == 401:
