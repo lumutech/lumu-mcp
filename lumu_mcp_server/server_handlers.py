@@ -15,7 +15,7 @@ lumu_client: Optional[LumuDefenderClient] = None
 async def handle_status_based_incidents(tool_name: str, arguments: dict) -> list[types.TextContent]:
     """Handle get_open_incidents, get_muted_incidents, get_closed_incidents."""
     global lumu_client
-    
+
     # Check if API key is configured
     if not os.getenv("LUMU_DEFENDER_API_KEY"):
         return [
@@ -24,34 +24,49 @@ async def handle_status_based_incidents(tool_name: str, arguments: dict) -> list
                 text="❌ Error: Lumu Defender API key not configured. Please set LUMU_DEFENDER_API_KEY in the Claude Desktop configuration."
             )
         ]
-    
+
+    # Determine status_name early for error handling
+    status_name = "unknown"
+    if tool_name == "get_open_incidents":
+        status_name = "open"
+    elif tool_name == "get_muted_incidents":
+        status_name = "muted"
+    elif tool_name == "get_closed_incidents":
+        status_name = "closed"
+
     try:
         # Initialize client if needed
         if lumu_client is None:
             lumu_client = LumuDefenderClient()
-        
+
         # Parse arguments
         args = arguments or {}
         adversary_types = args.get("adversary_types")
         labels = args.get("labels")
-        
+        page = args.get("page", 0)
+        limit = args.get("limit", 50)
+
         # Call appropriate method based on tool name
         if tool_name == "get_open_incidents":
-            result = await lumu_client.get_open_incidents(adversary_types=adversary_types, labels=labels)
-            status_name = "open"
+            result = await lumu_client.get_open_incidents(
+                adversary_types=adversary_types, labels=labels, page=page, limit=limit
+            )
         elif tool_name == "get_muted_incidents":
-            result = await lumu_client.get_muted_incidents(adversary_types=adversary_types, labels=labels)
-            status_name = "muted"
+            result = await lumu_client.get_muted_incidents(
+                adversary_types=adversary_types, labels=labels, page=page, limit=limit
+            )
         elif tool_name == "get_closed_incidents":
-            result = await lumu_client.get_closed_incidents(adversary_types=adversary_types, labels=labels)
-            status_name = "closed"
+            result = await lumu_client.get_closed_incidents(
+                adversary_types=adversary_types, labels=labels, page=page, limit=limit
+            )
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
-        
+
         # Format response
         incidents = result.get("incidents", [])
         total = len(incidents)
-        
+        pagination = result.get("pagination", {})
+
         if total == 0:
             message = f"No {status_name} incidents found for the specified criteria.\n\nSearch parameters:\n"
             if adversary_types:
@@ -62,20 +77,28 @@ async def handle_status_based_incidents(tool_name: str, arguments: dict) -> list
         else:
             # Create summary
             type_counts = {}
-            
+
             for incident in incidents:
                 # Count by adversary type
                 adv_types = incident.get("adversaryTypes", [])
                 for adv_type in adv_types:
                     type_counts[adv_type] = type_counts.get(adv_type, 0) + 1
-            
+
             message = f"Found {total} {status_name} incident(s)\n\n"
-            
+
+            # Add pagination info
+            has_more = pagination.get("has_more", False)
+            if has_more:
+                message += f"📄 Page {page + 1} (showing {total} of more available)\n"
+                message += f"💡 Use page={page + 1} for next page\n\n"
+            else:
+                message += f"📄 Page {page + 1} (complete results)\n\n"
+
             if type_counts:
                 message += "Adversary type breakdown:\n"
                 for adv_type, count in type_counts.items():
                     message += f"  • {adv_type}: {count}\n"
-            
+
             # Show first few incidents as examples
             message += f"\nRecent {status_name} incidents:\n"
             for incident in incidents[:5]:
@@ -83,18 +106,21 @@ async def handle_status_based_incidents(tool_name: str, arguments: dict) -> list
                 adv_types = incident.get('adversaryTypes', [])
                 message += f"  Types: {', '.join(adv_types) if adv_types else 'N/A'}\n"
                 message += f"  Timestamp: {incident.get('timestamp', 'N/A')}\n"
-                message += f"  Description: {incident.get('description', 'N/A')[:100]}...\n"
-            
+                desc = incident.get('description', 'N/A')
+                if desc and len(desc) > 100:
+                    desc = desc[:100] + "..."
+                message += f"  Description: {desc}\n"
+
             if total > 5:
                 message += f"\n... and {total - 5} more incidents"
-        
+
         return [
             types.TextContent(
                 type="text",
                 text=message
             )
         ]
-        
+
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg.lower():

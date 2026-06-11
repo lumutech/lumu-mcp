@@ -161,15 +161,31 @@ Returns the server status and API key configuration status.
 
 ### 2. `get_incidents`
 
-Retrieves security incidents with optional filters.
+Retrieves security incidents with optional filters and pagination support.
 
 **Parameters**:
 
-- `from_date` (optional): Start date in ISO format (default: 7 days ago)
+- `from_date` (optional): Start date in ISO format (default: 7 days ago). Max range: 90 days unless `fetch_all` is true.
 - `to_date` (optional): End date in ISO format (default: now)
 - `status` (optional): Array of statuses ["open", "muted", "closed"]
 - `adversary_types` (optional): Array of types ["C2C", "Malware", "DGA", "Mining", "Spam", "Phishing"]
 - `labels` (optional): Array of label IDs
+- `page` (optional): Page number for pagination (0-indexed, default: 0)
+- `limit` (optional): Number of items per page (default: 50, max: 100)
+- `fetch_all` (optional): If true, automatically fetches ALL incidents with pagination. Handles large date ranges by chunking.
+
+**Examples**:
+
+```
+# Get incidents with pagination
+"Get page 2 of incidents with 20 items per page"
+
+# Get ALL incidents for a date range
+"Get all incidents from May 1-31, 2026 with fetch_all=true"
+
+# Get all malware incidents
+"Get all Malware incidents with fetch_all=true"
+```
 
 ### 3. `get_incident_details`
 
