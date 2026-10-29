@@ -5,7 +5,7 @@
 An MCP (Model Context Protocol) server that seamlessly integrates Claude Desktop with the Lumu Defender API, enabling AI-powered security incident analysis and management.
 
 [![PyPI version](https://badge.fury.io/py/lumu-mcp-server.svg)](https://badge.fury.io/py/lumu-mcp-server)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11.18+](https://img.shields.io/badge/python-3.11.18+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## ✨ Features
@@ -13,7 +13,7 @@ An MCP (Model Context Protocol) server that seamlessly integrates Claude Desktop
 - 🔍 **Incident Retrieval**: Get security incidents with advanced filtering
 - 🎯 **Smart Analysis**: AI-powered incident analysis through Claude
 - 📊 **Full Management**: Mark as read, mute, unmute, and close incidents
-- 🖥️ **Endpoint Insights**: Analyze affected endpoints and network contacts
+- 🔬 **Event Drill-down**: Inspect incident event groupings and their raw security events
 - 📈 **Real-time Monitoring**: Track incident updates and activity
 - 🔐 **Secure Integration**: Environment-based API key management
 - ⚡ **Easy Setup**: One-command installation with pip
@@ -21,6 +21,15 @@ An MCP (Model Context Protocol) server that seamlessly integrates Claude Desktop
 ## 🚀 Quick Start
 
 ### 1. Install
+
+> **Security requirement (TLS/certificate fixes, Oct 2026):** install into a Python patched
+> against CVE-2026-115557 — **3.11.18 / 3.12.16 / 3.13.18 / 3.14.10** or newer — and upgrade pip
+> first (pip < 26.2.2 ships a vulnerable vendored certifi). A fresh install then pulls a patched
+> `certifi` (≥ 2026.10.19) automatically via `httpx`.
+>
+> ```bash
+> python -m pip install --upgrade "pip>=26.2.2"
+> ```
 
 ```bash
 pip install lumu-mcp-server
@@ -89,7 +98,7 @@ If the command isn't found, use the Python module directly:
   "mcpServers": {
     "lumu-mcp-server": {
       "command": "python",
-      "args": ["-m", "lumu_mcp_server.server"],
+      "args": ["-m", "lumu_mcp_server"],
       "env": {
         "LUMU_DEFENDER_API_KEY": "your-api-key-here"
       }
@@ -97,6 +106,29 @@ If the command isn't found, use the Python module directly:
   }
 }
 ```
+
+### Environment Variables
+
+All variables use the `LUMU_` prefix and are read at startup by a single typed
+configuration module. **`LUMU_DEFENDER_API_KEY` is required** — the server fails
+fast with a clear message if it is missing. Everything else has a safe default.
+
+| Variable | Purpose | Type | Default | Required | Secret |
+|---|---|---|---|---|---|
+| `LUMU_DEFENDER_API_KEY` | Lumu Defender API key | string | — | ✅ yes | ✅ yes |
+| `LUMU_API_BASE_URL` | Base URL of the Lumu Defender REST API | string | `https://defender.lumu.io/api` | no | no |
+| `LUMU_REQUEST_TIMEOUT` | Per-request HTTP timeout (seconds) | float > 0 | `30` | no | no |
+| `LUMU_NAME` | Server name reported to clients | string | `lumu-mcp-server` | no | no |
+| `LUMU_LOG_LEVEL` | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` | enum | `INFO` | no | no |
+| `LUMU_DEBUG` | Enable SDK debug mode | bool | `false` | no | no |
+| `LUMU_TRANSPORT` | `stdio` / `streamable-http` / `sse` | enum | `stdio` | no | no |
+
+> The `LUMU_TRANSPORT`/`LUMU_HOST`/`LUMU_PORT`/… transport variables apply only
+> to the advanced HTTP transports. The default, and the only mode used by Claude
+> Desktop, is `stdio`. See [`.env.example`](.env.example) for the full list.
+
+For local development you may place these in a git-ignored `.env` file (see
+`.env.example`); in production, set them in the client's `env` block instead.
 
 ### Activate the Integration
 
@@ -124,26 +156,30 @@ Once configured, you can interact with Lumu Defender through natural language:
 
 - _"Get details for incident [UUID]"_
 - _"Show me the full information about incident abc-123-def"_
-- _"Get the context for incident [UUID]"_
-- _"Show me related incidents and affected assets"_
+- _"Show me the event groupings for incident [UUID]"_
+- _"Get the raw events for grouping [ID] in incident [UUID]"_
 
 ### 📝 Incident Management
 
 - _"Add a comment to incident [UUID]: 'Investigating with network team'"_
 - _"Mark incident [UUID] as read"_
+- _"Begin work on incident [UUID] and assign it to user 42"_
 - _"Mute incident [UUID] with comment 'False positive'"_
 - _"Close incident [UUID] with comment 'Threat resolved'"_
 
-### 🖥️ Network Analysis
+### 🔬 Event Drill-down
 
-- _"Get endpoints for incident [UUID]"_
-- _"Show me which endpoints were affected by this incident"_
-- _"Analyze the network impact of incident abc-123-def"_
+- _"List the event groupings for incident [UUID]"_
+- _"Show me the raw security events for grouping [ID]"_
+
+### 🏷️ Labels
+
+- _"List all labels"_
+- _"What is label 7?"_
 
 ### 📊 Real-time Monitoring
 
-- _"Get incident updates from the last 10 minutes"_
-- _"Show me what happened in the last hour with incidents"_
+- _"Get incident updates"_
 - _"Check for recent incident activity"_
 
 ### 🔄 Advanced Workflows
@@ -151,13 +187,14 @@ Once configured, you can interact with Lumu Defender through natural language:
 - _"Get all open Malware incidents, then show details for the most recent one"_
 - _"Find critical incidents that are still open and summarize their impact"_
 - _"List all muted C2C incidents and help me decide which to unmute"_
-- _"Get incident endpoints and mark the incident as read when done"_
+- _"Show an incident's event groupings, then drill into the raw events"_
 
 ## Available Tools
 
 ### 1. `health_check`
 
-Returns the server status and API key configuration status.
+Returns the server status. (The server requires a valid API key to start, so if
+it is running the key is configured.)
 
 ### 2. `get_incidents`
 
@@ -197,18 +234,34 @@ Get detailed information about a specific security incident.
 
 **Returns**: Detailed incident information including status, IOCs, recommended actions, and more.
 
-### 4. `get_incident_context`
+### 4. `get_incident_events_groupings`
 
-Get context information for a specific security incident.
+Retrieve the event groupings of a specific incident (bundles of raw security events). Use the returned grouping IDs with `get_security_event_details`.
 
 **Parameters**:
 
 - `incident_id` (required): The UUID of the incident
-- `hash_type` (optional): Hash type for filtering context
+- `status` (optional): Array of statuses ["open", "muted", "closed"]
+- `page` (optional): Page number for pagination (0-indexed, default: 0)
+- `limit` (optional): Items per page (default: 50, max: 100)
 
-**Returns**: Context including related incidents, affected assets, threat intelligence, and timeline.
+**Returns**: Event grouping IDs with status and event counts.
 
-### 5. `comment_incident`
+### 5. `get_security_event_details`
+
+Retrieve the raw data of a specific event group within an incident.
+
+**Parameters**:
+
+- `incident_id` (required): The UUID of the incident
+- `event_id` (required): The event-grouping ID from `get_incident_events_groupings`
+- `sort` (optional): Sort order "asc" or "desc" (default: asc)
+- `page` (optional): Page number for pagination (0-indexed, default: 0)
+- `limit` (optional): Items per page (default: 50, max: 100)
+
+**Returns**: Raw security events for the event group.
+
+### 6. `comment_incident`
 
 Add a comment to a specific security incident.
 
@@ -219,7 +272,7 @@ Add a comment to a specific security incident.
 
 **Returns**: Confirmation of the comment being added.
 
-### 6. `get_open_incidents`
+### 7. `get_open_incidents`
 
 Retrieve only open security incidents.
 
@@ -230,7 +283,7 @@ Retrieve only open security incidents.
 
 **Returns**: List of open incidents with filtering options.
 
-### 7. `get_muted_incidents`
+### 8. `get_muted_incidents`
 
 Retrieve only muted security incidents.
 
@@ -241,7 +294,7 @@ Retrieve only muted security incidents.
 
 **Returns**: List of muted incidents with filtering options.
 
-### 8. `get_closed_incidents`
+### 9. `get_closed_incidents`
 
 Retrieve only closed security incidents.
 
@@ -251,18 +304,6 @@ Retrieve only closed security incidents.
 - `labels` (optional): Array of label IDs
 
 **Returns**: List of closed incidents with filtering options.
-
-### 9. `get_incident_endpoints`
-
-Retrieve endpoints and contacts for a specific security incident.
-
-**Parameters**:
-
-- `incident_id` (required): The UUID of the incident
-- `endpoints` (optional): Filter by specific endpoint IPs or names
-- `labels` (optional): Array of label IDs
-
-**Returns**: Detailed endpoint and contact information for the incident.
 
 ### 10. `mark_incident_as_read`
 
@@ -298,13 +339,13 @@ Unmute a security incident.
 
 ### 13. `get_incident_updates`
 
-Get real-time updates on incident operations (alternative to WebSocket).
+Get real-time updates on incident operations (long-poll).
 
 **Parameters**:
 
 - `offset` (optional): Starting offset for pagination (default: 0)
 - `items` (optional): Number of items to return, 1-100 (default: 50)
-- `time` (optional): Time window in minutes for updates (default: 5)
+- `time` (optional): Maximum seconds the server waits for updates (default: 5)
 
 **Returns**: List of incident updates with timestamps in UTC (RFC 3339/ISO 8601 format).
 
@@ -318,6 +359,39 @@ Close a security incident.
 - `comment` (optional): Comment explaining why the incident was closed
 
 **Returns**: Confirmation that the incident was closed.
+
+### 15. `begin_work`
+
+Begin work on a security incident and assign it to a user.
+
+**Parameters**:
+
+- `incident_id` (required): The UUID of the incident
+- `assignee` (required): The numeric user ID to assign the incident to
+- `comment` (optional): Comment
+
+**Returns**: Confirmation that work has begun and the incident is assigned.
+
+### 16. `list_labels`
+
+List labels configured in the Lumu account (label IDs are used by the incident `labels` filters).
+
+**Parameters**:
+
+- `page` (optional): Page number for pagination (0-indexed, default: 0)
+- `limit` (optional): Items per page (default: 50, max: 100)
+
+**Returns**: List of labels with id, name, and relevance.
+
+### 17. `get_label`
+
+Get a specific label by ID.
+
+**Parameters**:
+
+- `label_id` (required): The numeric ID of the label
+
+**Returns**: The label's name and relevance.
 
 ## 🔧 Troubleshooting
 
@@ -376,12 +450,29 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -e .
 ```
 
+### Project Layout
+
+```
+lumu_mcp_server/
+  config.py            # typed, env-driven settings (the only module reading env)
+  server.py            # build_server(settings) -> MCPServer (composition root)
+  __main__.py          # entrypoint: load settings -> build -> run
+  context.py           # AppContext + get_client(ctx) for dependency injection
+  services/
+    lumu_client.py     # LumuDefenderClient (async HTTP client)
+  tools/
+    health.py          # health_check
+    incidents.py       # incident query/listing tools
+    actions.py         # incident mutation tools (incl. begin_work)
+    administration.py  # labels
+```
+
 ### Adding New Features
 
-1. **API Methods**: Add to `lumu_mcp_server/lumu_client.py`
-2. **Tool Registration**: Update `handle_list_tools()` in `server.py`
-3. **Handler Implementation**: Add to `handle_call_tool()` in `server.py`
-4. **Testing**: Ensure functionality works with real API
+1. **API Methods**: Add a coroutine to `lumu_mcp_server/services/lumu_client.py`.
+2. **Tool**: Add an `@mcp.tool()` function in the relevant `tools/*` module; the
+   SDK generates the input schema from the function signature and docstring.
+3. **Config**: Add any new setting (with a docstring + default) to `config.py`.
 
 ## 📄 License
 

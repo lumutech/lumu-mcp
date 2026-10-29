@@ -4,7 +4,10 @@
 
 ### 1️⃣ Install the Package
 
+> **Requires** Python **3.11.18 / 3.12.16 / 3.13.18 / 3.14.10** or newer (Oct 2026 TLS fixes) and **pip ≥ 26.2.2**.
+
 ```bash
+python -m pip install --upgrade "pip>=26.2.2"
 pip install lumu-mcp-server
 ```
 
