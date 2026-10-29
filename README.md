@@ -24,11 +24,10 @@ An MCP (Model Context Protocol) server that seamlessly integrates Claude Desktop
 
 > **Security requirement (TLS/certificate fixes, Oct 2026):** install into a Python patched
 > against CVE-2026-115557 — **3.11.18 / 3.12.16 / 3.13.18 / 3.14.10** or newer — and upgrade pip
-> first (pip < 26.2.2 ships a vulnerable vendored certifi). A fresh install then pulls a patched
-> `certifi` (≥ 2026.10.19) automatically via `httpx`.
+> first. A fresh install then pulls a patched `certifi` (≥ 2026.10.19) automatically via `httpx`.
 >
 > ```bash
-> python -m pip install --upgrade "pip>=26.2.2"
+> python -m pip install --upgrade pip
 > ```
 
 ```bash
@@ -106,6 +105,29 @@ If the command isn't found, use the Python module directly:
   }
 }
 ```
+
+#### Claude Code (CLI)
+
+If you use Claude Code (the terminal CLI) instead of the Claude Desktop app,
+register the server and pass the API key in one command — no JSON file to edit:
+
+```bash
+claude mcp add lumu-mcp-server \
+  -e LUMU_DEFENDER_API_KEY=your-api-key-here \
+  -- lumu-mcp-server
+```
+
+- `-e KEY=value` sets the environment variable the server reads.
+- `--` separates Claude's own flags from the server command.
+- Add `-s user` to make it available in all your projects (default scope is the
+  current project). Avoid `-s project` with a real key, since that writes a
+  shared `.mcp.json`.
+
+Then run `/mcp` inside a session to confirm it's connected, and remove it later
+with `claude mcp remove lumu-mcp-server`.
+
+> **Note:** `claude mcp add` configures **Claude Code** only — it does not affect
+> the Claude Desktop app, which reads `claude_desktop_config.json` (above).
 
 ### Environment Variables
 
