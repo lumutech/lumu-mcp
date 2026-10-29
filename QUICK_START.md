@@ -4,10 +4,10 @@
 
 ### 1️⃣ Install the Package
 
-> **Requires** Python **3.11.18 / 3.12.16 / 3.13.18 / 3.14.10** or newer (Oct 2026 TLS fixes) and **pip ≥ 26.2.2**.
+> **Requires** Python **3.11.18 / 3.12.16 / 3.13.18 / 3.14.10** or newer (Oct 2026 TLS fixes). Upgrade pip first.
 
 ```bash
-python -m pip install --upgrade "pip>=26.2.2"
+python -m pip install --upgrade pip
 pip install lumu-mcp-server
 ```
 
@@ -31,6 +31,12 @@ Add this to your `claude_desktop_config.json` file:
   }
 }
 ```
+
+> **Using Claude Code (CLI) instead of the Desktop app?** Skip the JSON and run:
+> ```bash
+> claude mcp add lumu-mcp-server -e LUMU_DEFENDER_API_KEY=your-lumu-api-key -- lumu-mcp-server
+> ```
+> (This configures Claude Code only, not the Desktop app.)
 
 ### 3️⃣ Restart Claude Desktop
 
