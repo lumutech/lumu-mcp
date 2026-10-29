@@ -7,7 +7,11 @@ name = "lumu-mcp-server"
 version = "1.1.0"
 description = "MCP server for Lumu Defender API integration with Claude Desktop"
 readme = "README.md"
-requires-python = ">=3.10"
+# Floor raised to 3.11.18 for CVE-2026-115557 (ssl denylist for the compromised
+# eMudhra/emSign intermediates). Note: on 3.12/3.13/3.14 you must still use a patched
+# point release (3.12.16 / 3.13.18 / 3.14.10) or newer; requires-python cannot express
+# a per-minor floor, so this is enforced in the install docs and CI audit.
+requires-python = ">=3.11.18"
 license = {text = "MIT"}
 authors = [
     {name = "Juan Pablo Gonzalez", email = "support@lumu.io"}
@@ -19,15 +23,23 @@ classifiers = [
     "Intended Audience :: Information Technology",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    # MCP Python SDK v2. v2 renamed FastMCP -> MCPServer, removed the low-level
+    # decorator API, moved transport config off the constructor, and stopped
+    # reading MCP_* env vars. Pinned <3 so a future v3 cannot break imports silently.
+    "mcp>=2,<3",
+    # httpx is used directly by the Lumu API client (services/lumu_client.py).
+    # It is our own dependency, not the SDK's (the SDK now uses httpx2 internally).
     "httpx>=0.27.0",
+    # pydantic-settings is no longer a dependency of mcp in v2, so we declare it
+    # ourselves. It backs the typed, env-driven configuration in config.py.
+    "pydantic-settings>=2,<3",
 ]
 
 [project.urls]
@@ -37,4 +49,14 @@ Documentation = "https://github.com/jpyoda/lumu-mcp#readme"
 "Bug Tracker" = "https://github.com/jpyoda/lumu-mcp/issues"
 
 [project.scripts]
-lumu-mcp-server = "lumu_mcp_server.server:main"
+lumu-mcp-server = "lumu_mcp_server.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Correctness (pyflakes), import order (isort), modernization (pyupgrade), and
+# Ruff's own checks. Opinionated logging/exception-style rules are intentionally
+# left out so we don't force behavioral changes.
+select = ["E", "F", "I", "UP", "RUF"]

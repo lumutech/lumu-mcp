@@ -38,10 +38,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Test files
-test_*.py
-*_test.py
-TEST_*.md
+# Ad-hoc test scripts at the repo root (the real suite lives in tests/ and is tracked)
+/test_*.py
+/*_test.py
+/TEST_*.md
 
 # API keys and secrets
 .env
