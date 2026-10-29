@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lumu-mcp-server"
-version = "1.1.0"
+version = "2.0.0"
 description = "MCP server for Lumu Defender API integration with Claude Desktop"
 readme = "README.md"
 # Floor raised to 3.11.18 for CVE-2026-115557 (ssl denylist for the compromised
