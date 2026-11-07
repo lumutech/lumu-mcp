@@ -61,7 +61,7 @@ Ask Claude: _"Get security incidents from Lumu Defender"_
 
 ### Get Your Lumu Defender API Key
 
-1. Log in to your [Lumu Defender account](https://defender.lumu.io)
+1. Log in to your [Lumu Defender account](https://portal.lumu.io)
 2. Navigate to **Settings** → **API Keys**
 3. Generate or copy your API key
 
@@ -448,7 +448,7 @@ Get a specific label by ID.
 
 - 📖 Check [QUICK_START.md](QUICK_START.md) for simplified setup
 - 🐛 [Report issues](https://github.com/jpyoda/lumu-mcp/issues) on GitHub
-- 💬 [Ask questions](https://github.com/jpyoda/lumu-mcp/discussions) in discussions
+- 💬 [Ask questions](https://github.com/lumutech/lumu-mcp/issues) in issues
 
 ## 🔒 Security & Privacy
 
@@ -506,8 +506,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - 🚀 **Quick Setup**: [QUICK_START.md](QUICK_START.md)
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/jpyoda/lumu-mcp/issues)
-- 💬 **Questions**: [GitHub Discussions](https://github.com/jpyoda/lumu-mcp/discussions)
-- 📧 **Lumu API Issues**: [Contact Lumu Support](https://help.lumu.io)
+- 💬 **Questions**: [GitHub Issues](https://github.com/lumutech/lumu-mcp/issues)
+- 📧 **Lumu API Issues**: [Contact Lumu Support](https://docs.lumu.io)
 
 ### Project Stats
 
