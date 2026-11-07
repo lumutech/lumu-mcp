@@ -110,14 +110,21 @@ class LumuDefenderClient:
         """Translate an httpx status error into a user-facing ValueError/Exception."""
         status = exc.response.status_code
         text = exc.response.text
-        logger.error("API Error - Status: %s, Response: %s", status, text)
+        # The API key travels in the query string, so the full URL must never be logged.
+        url = exc.request.url
+        safe_url = f"{url.scheme}://{url.host}{url.path}"
+        logger.error("API Error - Status: %s, URL: %s, Response: %s", status, safe_url, text)
+        # `from None` is not cosmetic. str(httpx.HTTPStatusError) contains the full request URL,
+        # including `?key=<API_KEY>`. Without it the HTTPStatusError stays in __context__, and the
+        # tools log these failures with logger.error(..., exc_info=True), so the chained traceback
+        # writes the API key into the host's log file. A wrong or expired key hits this on every call.
         if status == 401:
-            raise ValueError(f"Invalid API key or unauthorized access. API Response: {text}")
+            raise ValueError(f"Invalid API key or unauthorized access. API Response: {text}") from None
         if status == 404 and incident_id is not None:
-            raise ValueError(f"Incident {incident_id} not found. API Response (404): {text}")
+            raise ValueError(f"Incident {incident_id} not found. API Response (404): {text}") from None
         if status == 400:
-            raise ValueError(f"Invalid request. API Response (400): {text}")
-        raise Exception(f"API request failed with status {status}. Response: {text}")
+            raise ValueError(f"Invalid request. API Response (400): {text}") from None
+        raise Exception(f"API request failed with status {status}. Response: {text}") from None
 
     @staticmethod
     def _normalize_incidents(data: dict[str, Any], page: int, limit: int) -> dict[str, Any]:
